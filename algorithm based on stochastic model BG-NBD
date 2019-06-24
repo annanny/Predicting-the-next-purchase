@@ -1,0 +1,36 @@
+from lifetimes.utils import summary_data_from_transaction_data
+from lifetimes import BetaGeoFitter
+
+
+"""Функция для определения факта покупки"""
+def predict_purchases (model,summary, t,bound):
+    
+    """
+    model - обученная модель
+    summary - датафрейм, содержащий id клиента, frequency, recency,T
+    t - прогнозный горизонт
+    bound - граница перехода от модельных покупок к прогнозируемым
+    """
+    
+    pr_purchases = pd.DataFrame()
+    purchases = model.conditional_expected_number_of_purchases_up_to_time(t, summary['frequency'], summary['recency'], summary['T'])
+    pr_purchases = pr_purchases.append(purchases,ignore_index=True)
+    pr_purchases=pr_purchases.dropna(axis=1)
+    num_pur=pr_purchases.T[(pr_purchases.T>bound)].dropna()
+    num_pur.columns = ['kolvo_pur']
+    num_pur['kolvo_pur']=1
+    
+    return num_pur
+
+"""Построение прогноза для одной категории"""
+def lifeW_onecat (data, model_fit, coef, t, bound, cat, date_test_start):
+        
+    df_cat = data[data['category'] == cat].sort_values('date').reset_index(drop=True)
+   
+    summary_cat = summary_data_from_transaction_data(df_cat, 'id', 'date', observation_period_end=date_test_start)
+    model = BetaGeoFitter(penalizer_coef=coef)
+    model.fit(summary_cat['frequency'], summary_cat['recency'], summary_cat['T'])
+
+    new_pur = predict_purchases (model, summary_cat, t,bound)
+    
+    return new_pur
