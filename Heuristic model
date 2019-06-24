@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 2 группа - прогноз определяется в соответствии со средним количеством дней между покупками, ограниченным в границах (0.5 Me; 1.5 Me), где Me – медианное количество дней между транзакциями для всей выборки клиентов.
 3 группа - к дате последней покупки прибавляем среднее число дней между последними m транзакциями. 
 
-Обозначения: 
+Параметры: 
 data - набор данных, включающий id клиента, дату покупки (date), категорию товара (category)
 cat - название категории
 freq = k - количество покупок
@@ -27,60 +27,60 @@ date_test_end - дата окончания тестового периода
 """
 
 
-#Функция для построения прогноза и оценки точности по одной категории
+"""Функция для построения прогноза и оценки точности по одной категории"""
 def base_one_catW (data, cat, freq, kolvo_last_pur, date_test_start, date_test_end):
    
     df_cat = data[data.category== cat].sort_values('date').reset_index(drop=True)
     test = df_cat[(df_cat.date >=date_test_start)&(df_cat.date < date_test_end)].groupby(['id','date']).size().to_frame(name='kolvo_pur_real').reset_index()
     
- #Количество дней между покупками
+ """Количество дней между покупками"""
     df_base = df_cat.groupby(['id','date']).size().reset_index()
     df_base['date_shift'] = df_base.groupby('id').date.shift(1)
     df_base['days_between'] = (df_base['date'] - df_base['date_shift']).dt.days
- #Считаем медиану и коэффициент вариации по всем клиентам
+ """Считаем медиану и коэффициент вариации по всем клиентам"""
     median = df_base['days1'].median()
     var = df_base['days1'].var()
- #Количество покупок
+ """Количество покупок"""
     freq_cat= df_cat[(df_cat.date<date_test_start)].groupby(['id'])['date'].nunique().to_frame(name='freq_pur')
- #Выделение групп клиентов по частоте покупки
+ """Выделение групп клиентов по частоте покупки"""
     id_freq_1 = freq_cat[freq_cat.freq_pur == 1].index
     id_freq_2 = freq_cat[(freq_cat.freq_pur >1)&(freq_cat.freq_pur <= freq)].index
     id_freq_3 = freq_cat[(freq_cat.freq_pur > freq)].index
- #Определяем регулярных клиентов
+ """Определяем регулярных клиентов"""
     var_group = df_base[df_base.id.isin(id_freq_3)].groupby(['id'])['days1'].var().to_frame(name='var')
     id_reg = var_group[var_group['var'] < var].index
     id_not_reg = var_group[var_group['var'] >= var].index
- #Добавляем нерегулярных клиентов во вторую группу
+ """Добавляем нерегулярных клиентов во вторую группу"""
     id_other = id_freq_2.append(id_not_reg)
- #Находим день последней покупки в обучающей выборке
+ """Находим день последней покупки в обучающей выборке"""
     last_day= df_cat[(df_cat.date<date_test_start)].groupby(['id','date']).size().reset_index().groupby('id').tail(1)[['date','id']].reset_index(drop=True)    
  
  
- #Прогноз для клиентов с одной покупкой
+ """Прогноз для клиентов с одной покупкой"""
     group1 = last_day[last_day.id.isin(id_freq_1)]
     group1['next_pur'] = last_day[last_day.id.isin(id_freq_1)]['date'] + timedelta(median)
     
- #Прогноз для частых и регулярных клиентов
+ """Прогноз для частых и регулярных клиентов"""
     last_pur = df_base.groupby('id').tail(kolvo_last_pur)[['date','id','days1']].reset_index(drop=True)
     group_reg= last_day[last_day.id.isin(id_reg)].set_index('id')
     last_pur_reg = last_pur[last_pur.id.isin(id_reg)].set_index('id')
     group_reg['mean'] = last_pur_reg.groupby('id')['days1'].mean()
     group_reg['next_pur'] = group_reg.apply(lambda x: x['date'] + timedelta(x['mean']) , axis=1)
     
- #Прогноз для 2-й группы
+ """Прогноз для 2-й группы"""
     group_other = last_day[last_day.id.isin(id_other)].set_index('id')
     group_other['days_between'] = df_base[df_base.id.isin(id_other)].groupby('id').days1.mean().to_frame(name='days_between')
     group_other.loc[group_other['days_between']<median/2,'next_pur'] = group_other['date'] + timedelta(median/2) 
     group_other.loc[group_other['days_between']>1.5*median,'next_pur'] = group_other['date'] + timedelta(1.50*median) 
     group_other.loc[(group_other['days_between']>0.50*median)&(group_other['days_between']<1.50*median),'next_pur'] = group_other.apply(lambda x: x['date'] + timedelta(x['days_between']) , axis=1) 
     
- #Общий датафрейм
+ """Общий датафрейм"""
     next_pur_itog = group_other.append(group_reg.drop('mean',axis=1),ignore_index=False).append(group1.set_index('id'),ignore_index=False)
     next_pur_itogW = next_pur_itog[(next_pur_itog.next_pur >=date_test_start)&(next_pur_itog.next_pur < date_test_end)]
     next_pur_itogW['real_pur'] = test.groupby('id').first()['date']
     next_pur_itogW['delta'] = (next_pur_itogW['next_pur'] - next_pur_itogW['real_pur']).dt.days
     
- #Оценка точности (общая)
+ """Оценка точности (общая)"""
     all_id = df_cat[df_cat.date<date_test_start].id.unique()
     predicted_id = next_pur_itogW.index.unique()
     true_id = test[test.id.isin(df_cat[df_cat.date<date_test_start].id.unique())].id.unique()
@@ -94,7 +94,7 @@ def base_one_catW (data, cat, freq, kolvo_last_pur, date_test_start, date_test_e
         f1 = 2*precision*recall/(precision+recall)
     accuracy = (2*len(predict_true_id)+len(all_id)-len(predicted_id)-len(true_id))/len(all_id)
     
- #Оценка точности (1-я группа)
+ """Оценка точности (1-я группа)"""
     predicted_id_1 = next_pur_itogW[next_pur_itogW.index.isin(id_freq_1)].index.unique()
     true_id_1 = test[test.id.isin(id_freq_1)].id.unique()
     predict_true_id_1 = test[test.id.isin(predicted_id_1)].id.unique()
@@ -107,7 +107,7 @@ def base_one_catW (data, cat, freq, kolvo_last_pur, date_test_start, date_test_e
         f1_1 = 2*precision_1*recall_1/(precision_1+recall_1)
 
     
- #Оценка точности (2-я группа)
+ """Оценка точности (2-я группа)"""
     predicted_id_2 = next_pur_itogW[next_pur_itogW.index.isin(id_other)].index.unique()
     true_id_2 = test[test.id.isin(id_other)].id.unique()
     predict_true_id_2= test[test.id.isin(predicted_id_2)].id.unique()
@@ -120,7 +120,7 @@ def base_one_catW (data, cat, freq, kolvo_last_pur, date_test_start, date_test_e
         f1_2 = 2*precision_2*recall_2/(precision_2+recall_2)
 
     
- #Оценка точности (3-я группа)
+ """Оценка точности (3-я группа)"""
     predicted_id_3 = next_pur_itogW[next_pur_itogW.index.isin(id_reg)].index.unique()
     true_id_3 = test[test.id.isin(id_reg)].id.unique()
     predict_true_id_3= test[test.id.isin(predicted_id_3)].id.unique()
@@ -134,12 +134,12 @@ def base_one_catW (data, cat, freq, kolvo_last_pur, date_test_start, date_test_e
 
     return [cat,freq,kolvo_last_pur,len(all_id),len(predicted_id), len(true_id), len(predict_true_id), precision,recall,f1,accuracy,precision_1,precision_2,precision_3,recall_1, recall_2, recall_3, f1_1,f1_2,f1_3]
 
-#Применяем ко всем категориям
+"""Применяем ко всем категориям"""
 cat_res = []
 for i in cat_list:
     one_cat = base_one_catW (sales_6M_new, i,4,3, '2019-02-01', '2019-02-28')
     cat_res.append(one_cat)
-#Общий датафрейм
+"""Общий датафрейм"""
 baseline = pd.DataFrame(cat_res,columns =['cat','freq','kolvo_last_pur','all_id','predicted_id', 'true_id', 'predict_true_id','precision','recall','f1','accuracy','precision_1','precision_2','precision_3','recall_1','recall_2','recall_3','f1_1','f1_2','f1_3'])
  
  
